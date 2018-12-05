@@ -30,3 +30,7 @@ df.printSchema()
 df.createOrReplaceTempView("People")
 sparksql.sql("SELECT SUM(age) AS ageTotal FROM People").show()
 
+result = sparksql.sql("SELECT SUM(age) AS ageTotal FROM People")
+
+
+
