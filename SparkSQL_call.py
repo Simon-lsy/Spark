@@ -12,7 +12,7 @@ def parse(line):
     items = line.split("	")
     return (
         items[0], items[1], items[2], items[3], items[4], items[5], items[6], items[7], items[8], items[9], items[10],
-        items[11], items[12], items[13], 0)
+        int(items[11]), items[12], items[13], 0)
 
 
 # callRDD = sc.textFile("C:/Users/Admin/PycharmProjects/Spark/call.txt").map(parse)
@@ -30,7 +30,7 @@ schema = StructType([
     StructField("called_roam_city", StringType(), True),
     StructField("start_time", StringType(), True),
     StructField("end_time", StringType(), True),
-    StructField("raw_dur", StringType(), True),
+    StructField("raw_dur", IntegerType(), True),
     StructField("call_type", StringType(), True),
     StructField("calling_cell", StringType(), True),
     StructField("period", IntegerType(), True)
@@ -44,16 +44,16 @@ callDf = sparksql.createDataFrame(callRDD, schema)
 
 # define timedelta function (obtain duration in seconds)
 # 计算不同时间段下的通话时长
-def time_delta(end, start, period):
+def time_delta(start, duration, period):
     period_start = datetime.datetime.strptime(str(period) + ':00:00', '%H:%M:%S')
     if period == 21:
         period_end = datetime.datetime.strptime('00:00:00', '%H:%M:%S') + datetime.timedelta(days=1)
     else:
         period_end = datetime.datetime.strptime(str(period + 3) + ':00:00', '%H:%M:%S')
-    end_time = datetime.datetime.strptime(end, '%H:%M:%S')
     start_time = datetime.datetime.strptime(start, '%H:%M:%S')
-    if end_time < start_time:
-        end_time += datetime.timedelta(days=1)
+    end_time = start_time + datetime.timedelta(seconds=duration)
+    # 处理跨天的通话
+    if int(start_time.day) < int(end_time.day):
         if period == 0:
             period_start += datetime.timedelta(days=1)
             period_end += datetime.timedelta(days=1)
@@ -79,9 +79,9 @@ def time_delta(end, start, period):
 get_duration = udf(time_delta, IntegerType())
 
 for i in range(1, 9):
-    callDf = callDf.withColumn('Duration' + str(i), get_duration(callDf.end_time, callDf.start_time, callDf.period))
+    callDf = callDf.withColumn('Duration' + str(i), get_duration(callDf.start_time, callDf.raw_dur, callDf.period))
     callDf = callDf.withColumn('period', callDf.period + 3)
-# callDf.show()
+
 
 callDf.createOrReplaceTempView("Call")
 
@@ -101,29 +101,28 @@ callDf.createOrReplaceTempView("Call")
 
 # 每日平均通话次数
 callNumber = sparksql.sql("SELECT calling_nbr, round(COUNT(Call.calling_nbr)/29, 2) AS num FROM Call GROUP BY calling_nbr")
-callNumber.toPandas().to_csv('callNumber.csv', index=False)
+callNumber.toPandas().to_csv('../myresult/callNumber.csv', index=False)
 
 
 # 不同通话类型下各个运营商的数量占比
 # 本地
 local = sparksql.sql(
-    "SELECT called_optr, round(COUNT(Call.called_nbr) * 1.00/(select COUNT(Call.called_nbr) from Call) ,2) AS num FROM Call WHERE call_type == 1 GROUP BY called_optr")
-local.toPandas().to_csv('local.csv', index=False)
+    "SELECT called_optr, round(COUNT(Call.called_nbr) * 1.000/(select COUNT(Call.called_nbr) from Call WHERE call_type == 1) ,3) AS num FROM Call WHERE call_type == 1 GROUP BY called_optr")
+local.toPandas().to_csv('../myresult/local.csv', index=False)
 
 # 长途
 longDistance = sparksql.sql(
-    "SELECT called_optr, round(COUNT(Call.called_nbr) * 1.00/(select COUNT(Call.called_nbr) from Call) ,2) AS num FROM Call WHERE call_type == 2 GROUP BY called_optr")
-longDistance.toPandas().to_csv('longDistance.csv', index=False)
+    "SELECT called_optr, round(COUNT(Call.called_nbr) * 1.000/(select COUNT(Call.called_nbr) from Call WHERE call_type == 2) ,3) AS num FROM Call WHERE call_type == 2 GROUP BY called_optr")
+longDistance.toPandas().to_csv('../myresult/longDistance.csv', index=False)
 
 # 漫游
 roaming = sparksql.sql(
-    "SELECT called_optr, round(COUNT(Call.called_nbr) * 1.00/(select COUNT(Call.called_nbr) from Call) ,2) AS num FROM Call WHERE call_type == 3 GROUP BY called_optr")
-roaming.toPandas().to_csv('roaming.csv', index=False)
+    "SELECT called_optr, round(COUNT(Call.called_nbr) * 1.000/(select COUNT(Call.called_nbr) from Call WHERE call_type == 3) ,3) AS num FROM Call WHERE call_type == 3 GROUP BY called_optr")
+roaming.toPandas().to_csv('../myresult/roaming.csv', index=False)
 
 
 # 计算个人通话时长所占比例
 callDuration = sparksql.sql(
-    "SELECT calling_nbr, SUM(Call.Duration1)/SUM(raw_dur) AS proportion1, SUM(Call.Duration2)/SUM(raw_dur) AS proportion2, SUM(Call.Duration3)/SUM(raw_dur) AS proportion3,SUM(Call.Duration4)/SUM(raw_dur) AS proportion4,SUM(Call.Duration5)/SUM(raw_dur) AS proportion5,SUM(Call.Duration6)/SUM(raw_dur) AS proportion6,SUM(Call.Duration7)/SUM(raw_dur) AS proportion7,SUM(Call.Duration8)/SUM(raw_dur) AS proportion8 FROM Call GROUP BY calling_nbr")
+    "SELECT calling_nbr, round(SUM(Call.Duration1)/SUM(raw_dur),3) AS proportion1, round(SUM(Call.Duration2)/SUM(raw_dur),3) AS proportion2, round(SUM(Call.Duration3)/SUM(raw_dur),3) AS proportion3,round(SUM(Call.Duration4)/SUM(raw_dur),3) AS proportion4,round(SUM(Call.Duration5)/SUM(raw_dur),3) AS proportion5,round(SUM(Call.Duration6)/SUM(raw_dur),3) AS proportion6,round(SUM(Call.Duration7)/SUM(raw_dur),3) AS proportion7,round(SUM(Call.Duration8)/SUM(raw_dur),3) AS proportion8 FROM Call GROUP BY calling_nbr")
+callDuration.toPandas().to_csv('../myresult/callDuration.csv', index=False)
 # callDuration.show()
-callDuration.toPandas().to_csv('callDuration.csv', index=False)
-
